@@ -1,0 +1,133 @@
+---
+title: "RiskTaking_Entropy_Affect_Analyses_Plots"
+author: "Natalie Saragosa-Harris"
+date: "September 2019"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+#change to cache = TRUE for files to write out
+knitr::opts_chunk$set(cache = FALSE)
+```
+
+```{r setDirs, echo = FALSE}
+root <- rprojroot::find_rstudio_root_file()
+dataDir <- file.path(root, 'Data')
+setwd(dataDir)
+```
+
+``` {r loadPackages, echo = FALSE, message=FALSE, warning=FALSE, results="hide"}
+library(ggplot2)
+library(effects)
+library(lmerTest)
+library(dplyr)
+library(lme4)
+```
+
+``` {r loadData, echo = FALSE, message=FALSE, warning=FALSE}
+# Load data.
+movesEMA2 = read.table("All_Data_Long_Form.csv", header=T, sep=",",as.is=TRUE,strip.white=TRUE,fill=TRUE)
+shortdata = read.table("All_Data_Short_Form.csv", header=T, sep=",",as.is=TRUE,strip.white=TRUE,fill=TRUE)
+movesEMA2$Group <- as.factor(movesEMA2$Group)
+movesEMA2$Participant_ID<- as.factor(movesEMA2$Participant_ID)
+shortdata$Group <- as.factor(shortdata$Group)
+shortdata$Participant_ID<- as.factor(shortdata$Participant_ID)
+
+riskscores <- shortdata[,c("Participant_ID", "Age", "DOSPERT_Percent","CARE_Percent","Risk_Percent","Risk_Z")]
+#View(riskscores)
+
+observations <- length(movesEMA2$Participant_ID) 
+participants <- length(shortdata$Participant_ID)
+number_adolescents <- length(subset(shortdata,Group==1)$Participant_ID)
+number_adults <- length(subset(shortdata,Group==2)$Participant_ID)
+```
+
+Total participants:
+`r toString(participants)`,
+Adolescents:
+`r toString(number_adolescents)`,
+Adults:
+`r toString(number_adults)`,
+Total observations:
+`r toString(observations)`.
+
+
+```{r CalculateZScores, echo = FALSE, message=FALSE, warning=FALSE}
+# Calculate z scores with the final sample.
+shortdata$Age_Z <- as.vector(scale(shortdata$Age, center=TRUE, scale=TRUE))
+shortdata$AgeZ_Squared <- (shortdata$Age_Z)^2
+Age_Z <- shortdata[,c("Participant_ID","Age_Z")]
+movesEMA2 <- merge(movesEMA2,Age_Z,by.x = "Participant_ID",by.y = "Participant_ID",all.x = TRUE)
+AgeZ_Squared <- shortdata[,c("Participant_ID","AgeZ_Squared")]
+movesEMA2 <- merge(movesEMA2,AgeZ_Squared,by.x = "Participant_ID",by.y = "Participant_ID",all.x = TRUE)
+
+shortdata$Daily_RE_Mean_Z <- as.vector(scale(shortdata$Daily_RE_Mean, center=TRUE,scale=TRUE)) #Center the predictor (roaming entropy).
+shortdata$Risk_Z <- as.vector(scale(shortdata$Risk_Percent,scale=TRUE,center=TRUE))
+
+no_outlier_short <- subset(shortdata, Risk_Z < 2.5) # Get rid of outlier.
+no_outlier_short <- subset(no_outlier_short, Daily_RE_Mean_Z > -2.5)# Get rid outlier.
+```
+
+# Distribution of daily roaming entropy means across participants (colored by age group).
+```{r EntropyAveragesDistributions, echo = FALSE, message = FALSE}
+ggplot(shortdata, aes(x=Daily_RE_Mean, color=Group, fill = Group)) +
+  geom_histogram(alpha=0.5) +
+  scale_color_manual(values = c("#7BACAB", "gray40"), labels = c("Adolescent", "Adult"), name = "Age Group") +
+  scale_fill_manual(values = c("#7BACAB", "gray40"), labels = c("Adolescent", "Adult"), name = "Age Group") +
+  ylab("Count") +
+  xlab("Daily RE Average") +
+  ggtitle("Average Daily Roaming Entropy Distribution by Age Group")+
+  theme(title= element_text(size=26, vjust=2, face="bold"),
+        axis.title.x= element_text(size=18, vjust=-0.3),
+        axis.title.y= element_text(size=18, vjust=1.5),
+        axis.text.x= element_text(size=18, colour="black"),
+        axis.text.y= element_text(size=18, colour="black"),
+        legend.title= element_text(size=24), 
+        legend.text= element_text(size=24),
+        strip.text = element_text(size=24, face="bold"), 
+        panel.background = element_blank(),
+        axis.line = element_line(colour = "black"))
+```
+
+# Does average daily roaming entropy predict risk taking in adolescents and adults?
+```{r AverageEntropyRiskTaking, echo = FALSE, message=FALSE, warning=FALSE}
+CompositeRisk_Entropy_Group_Int <- lm(Risk_Percent ~ Daily_RE_Mean_Z*Group, data = shortdata)
+summary(CompositeRisk_Entropy_Group_Int)
+plot(effect("Daily_RE_Mean_Z*Group",CompositeRisk_Entropy_Group_Int))
+plot(effect("Group",CompositeRisk_Entropy_Group_Int)) 
+
+ggplot(no_outlier_short, aes(x=Daily_RE_Mean_Z, y=Risk_Percent, color = Group, fill = Group)) + 
+  geom_point(size=5) + 
+  scale_color_manual(values = c("#7BACAB", "gray40"), labels = c("Adolescent", "Adult"), name = "Age Group") +
+  scale_fill_manual(values = c("#7BACAB", "gray40"), labels = c("Adolescent", "Adult"), name = "Age Group") +
+  ylab("Risk Composite Score") +
+  xlab("Average entropy (z)") +
+  ggtitle("Predicted Risk Scores")+
+  theme(title= element_text(size=26, vjust=2, face="bold"),
+        axis.title.x= element_text(size=18, vjust=-0.3),
+        axis.title.y= element_text(size=18, vjust=1.5),
+        axis.text.x= element_text(size=18, colour="black"),
+        axis.text.y= element_text(size=18, colour="black"),
+        legend.title= element_text(size=24), 
+        legend.text= element_text(size=24),
+        strip.text = element_text(size=24, face="bold"), 
+        panel.background = element_blank(),
+        axis.line = element_line(colour = "black"))+
+        expand_limits(x=c(-2.5,2.5), y=c(0, 0.75)) +
+        stat_smooth(method = "lm", se = TRUE, size = 4, alpha = 0.2, fullrange = TRUE, inherit.aes = TRUE) 
+       
+```
+
+### Positive affect x entropy model with correlated slopes.
+```{r PositiveEntropyRiskTaking, echo = FALSE, message=FALSE, warning=FALSE}
+# Does daily roaming entropy (exploration) predict reported daily positive affect?
+RE_positive_model <-  lmer(PosAff~  RE_Z +  (1 + RE_Z | Participant_ID), data=movesEMA2) # correlated slopes and intercepts.
+summary(RE_positive_model)
+```
+
+### Negative affect x entropy model with uncorrelated slopes.
+```{r NegativeEntropyRiskTakingUncorrelatedSlopes, echo = FALSE, message=FALSE, warning=FALSE}
+# Does daily roaming entropy (exploration) predict reported daily negative affect?
+RE_negative_model <-  lmer(NegAff~  RE_Z +  (RE_Z || Participant_ID), data=movesEMA2) # uncorrelated slopes and intercepts.
+summary(RE_negative_model)
+```
