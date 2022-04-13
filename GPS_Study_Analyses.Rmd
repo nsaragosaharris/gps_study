@@ -65,7 +65,7 @@ nsh_theme <- theme(title= element_text(size=26, vjust=2, face="bold"),
 ```
 
 ```{r CalculateAverageNovelty, echo = FALSE, message=FALSE, warning=FALSE}
-# ######  This function will remove cases with missing data and save only the cases with values into a vector. ###### 
+# This function will remove cases with missing data and save only the cases with values into a vector.
 completeFun <- function(data, desiredCols) {
   completeVec <- complete.cases(data[, desiredCols])
   return(data[completeVec, ])
@@ -100,8 +100,8 @@ longdata_NoMissingGPS_FirstTenDaysRemoved$Novelty_FirstTenDaysRemoved_Z <- (long
 *Age distributions in sample.*
 
 ``` {r AgeDistributions, echo = FALSE, message=FALSE, warning=FALSE}
-max_age <- max(round(shortdata$Age),na.rm = TRUE) # 28.
-min_age <- min(round(shortdata$Age),na.rm = TRUE) # 13.
+max_age <- max(round(shortdata$Age),na.rm = TRUE)
+min_age <- min(round(shortdata$Age),na.rm = TRUE)
 
 total_plot <- ggplot(shortdata, aes(x=round(Age))) +
        geom_bar(width=0.7,alpha= 0.8, position = position_dodge(width=0.3)) +
@@ -144,7 +144,7 @@ ggplot(longdata_NoMissingGPS_FirstTenDaysRemoved, aes(x=Novelty, color=Group, fi
 *Does roaming entropy predict exposure to novelty?*
 
 ```{r EntropyNovelty, echo = FALSE, message=FALSE, warning=FALSE}
-# New: use glmmTMB to estimate zero-inflated model with poisson family distribution.
+# Use glmmTMB to estimate zero-inflated model with poisson family distribution.
 # https://fcorowe.github.io/countdata_modelling/
 
 equation <- Novelty ~ RE_Z + (1 | Participant_ID)
@@ -174,7 +174,7 @@ confint(novelty_entropy_poisson_zeroinflated_binom_distance, level = 0.95)
 
 ```{r AgeEntropy, echo = FALSE, message=FALSE, warning=FALSE}
 
-# There is one person with an entropy z score < -2.5 so we are using robust regression to account for the potential effect of outliers on the estimates.
+# We are using robust regression to account for the potential effect of outliers on the estimates.
 
 # Group effect.
 group_entropy_robust_standardized <- rlm(scale(Daily_RE_Mean,center=TRUE) ~ Group, data = shortdata) # Standardized coefficients.
@@ -187,9 +187,9 @@ Quadratic_Age_Z_Entropy_robust <- rlm(Daily_RE_Mean ~ Age_Z + AgeZ_Squared, data
 Quadratic_Age_Z_Entropy_robust_standardized <- rlm(scale(Daily_RE_Mean,center=TRUE) ~ Age_Z + AgeZ_Squared, data = shortdata) # Standardized coefficients. Age_Z and AgeZ_Squared are already scaled.
 
 # Compare the three age models.
-AIC(group_entropy_robust_standardized) # 164.53.
-AIC(linear_age_entropy_robust_standardized) # 168.78.
-AIC(Quadratic_Age_Z_Entropy_robust_standardized) # 164.73.
+AIC(group_entropy_robust_standardized)
+AIC(linear_age_entropy_robust_standardized)
+AIC(Quadratic_Age_Z_Entropy_robust_standardized)
 
 # AIC for quadratic age and group are nearly identical.
 summary(group_entropy_robust_standardized)
@@ -334,7 +334,7 @@ confint(PosAffect_RE_AgeGroup,method = "boot")
 # There should be full observations for all of the control variables.
 
 PosAffect_RE_AgeGroup_controls <-  lmer(PosAff ~  RE_Z * Group + (1 + RE_Z | Participant_ID) + mean_temp + precipitation + TimeofDay + DayofWeek + distance_miles, data= longdata, na.action=na.exclude)
-summary(PosAffect_RE_AgeGroup_controls) # None of the covariates are significant predictors.
+summary(PosAffect_RE_AgeGroup_controls)
 confint(PosAffect_RE_AgeGroup_controls,method = "boot")
 
 ```
@@ -600,28 +600,25 @@ AIC(quadratic_age_z_phone_text_entropy_robust)
 # The AIC is similar for linear and age group models.
 # Age group.
 summary(group_phone_text_entropy_robust)
-f.robftest(group_phone_text_entropy_robust, var = "Daily_RE_Mean_Z") # b1.
+f.robftest(group_phone_text_entropy_robust, var = "Daily_RE_Mean_Z")
 stats::confint.default(object = group_phone_text_entropy_robust, parm = "Daily_RE_Mean_Z", level = 0.95)
 
-f.robftest(group_phone_text_entropy_robust, var = "Group2") # b2.
+f.robftest(group_phone_text_entropy_robust, var = "Group2")
 stats::confint.default(object = group_phone_text_entropy_robust, parm = "Group2", level = 0.95)
 
-f.robftest(group_phone_text_entropy_robust, var = "Daily_RE_Mean_Z:Group2") # b3 (interaction).
+f.robftest(group_phone_text_entropy_robust, var = "Daily_RE_Mean_Z:Group2")
 stats::confint.default(object = group_phone_text_entropy_robust, parm = "Daily_RE_Mean_Z:Group2", level = 0.95)
 
 # Linear age.
 summary(linear_age_phone_text_entropy_robust)
-f.robftest(linear_age_phone_text_entropy_robust, var = "Daily_RE_Mean_Z") # b1.
+f.robftest(linear_age_phone_text_entropy_robust, var = "Daily_RE_Mean_Z")
 stats::confint.default(object = linear_age_phone_text_entropy_robust, parm = "Daily_RE_Mean_Z", level = 0.95)
-# estimate = 0.37, 95% CI [0.17, 0.56], F(42) = 13.44, p < 0.001.
 
-f.robftest(linear_age_phone_text_entropy_robust, var = "Age_Z") # b2.
+f.robftest(linear_age_phone_text_entropy_robust, var = "Age_Z")
 stats::confint.default(object = linear_age_phone_text_entropy_robust, parm = "Age_Z", level = 0.95)
-# estimate = -0.09, 5% CI [-0.28, 0.09], F(42) =  0.97, p = 0.33.
 
-f.robftest(linear_age_phone_text_entropy_robust, var = "Daily_RE_Mean_Z:Age_Z") # b3 (interaction).
+f.robftest(linear_age_phone_text_entropy_robust, var = "Daily_RE_Mean_Z:Age_Z")
 stats::confint.default(object = linear_age_phone_text_entropy_robust, parm = "Daily_RE_Mean_Z:Age_Z", level = 0.95)
-# estimate = -0.14, 95% CI [-0.34, 0.06], F(42) = 2.06, p = 0.16.
 
 # Note that the linear term for roaming entropy is still significant in the interaction models.
 f.robftest(group_phone_text_entropy_robust, var = "Daily_RE_Mean_Z")
@@ -784,13 +781,13 @@ AIC(CARE_entropy_quadratic_age)
 
 # Age group has the lowest AIC value so look at that one.
 summary(CARE_entropy_age_group)
-f.robftest(CARE_entropy_age_group, var = "Daily_RE_Mean_Z") # b1.
+f.robftest(CARE_entropy_age_group, var = "Daily_RE_Mean_Z")
 stats::confint.default(object = CARE_entropy_age_group, parm = "Daily_RE_Mean_Z", level = 0.95)
 
-f.robftest(CARE_entropy_age_group, var = "Group2") # b2.
+f.robftest(CARE_entropy_age_group, var = "Group2")
 stats::confint.default(object = CARE_entropy_age_group, parm = "Group2", level = 0.95)
 
-f.robftest(CARE_entropy_age_group, var = "Daily_RE_Mean_Z:Group2") # b3 (interaction).
+f.robftest(CARE_entropy_age_group, var = "Daily_RE_Mean_Z:Group2")
 stats::confint.default(object = CARE_entropy_age_group, parm = "Daily_RE_Mean_Z:Group2", level = 0.95)
 
 mean(subset(shortdata,Group == 1)$CARE_Total)
