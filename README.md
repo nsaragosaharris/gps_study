@@ -5,7 +5,7 @@ For questions about the data or scripts, email nsaragosaharris@ucla.edu.
 
 **Data.**
 
-All data required to reproduce the reported results are included in the 'Data' folder.
+All data required to reproduce the reported results are included in this repository.
 
 All_Data_Long_Form.csv: This is the longitudinal, within-participant data that includes daily roaming entropy and affect values.
 
@@ -15,4 +15,4 @@ Note that, due to the inherently identifiable nature of raw GPS data (i.e., long
 
 **Analyses.**
 
-All analyses required to reproduce the reported results are in Analysis/GPS_Study_Analyses.Rmd.
+All analyses required to reproduce the reported results are in the script GPS_Study_Analyses.Rmd.
