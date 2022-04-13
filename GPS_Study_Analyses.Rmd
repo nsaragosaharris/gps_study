@@ -1,5 +1,5 @@
 ---
-title: "Analysis script for manuscript: Real-world exploration increases across adolescence and relates to affect, risk-taking, and social connectivity"
+title: "Analysis script for manuscript: Real-world exploration increases across adolescence and relates to affect, risk-taking, and social connectivity."
 author: "Natalie Saragosa-Harris"
 output: pdf_document
 fontfamily: arev
@@ -26,7 +26,7 @@ library(gtsummary) # For tbl_regression function.
 
 ``` {r loadData, echo = FALSE, message=FALSE, warning=FALSE}
 
-setwd("/Users/nataliesaragosa-harris/Box/HartleyLab_SHARED/1_STUDIES/MovesDev_AliHaniyyahAmberDasha/Data Sheets")
+setwd("") # Your working directory here.
 
 longdata = read.table("All_Data_Long_Form.csv", header=T, sep=",",as.is=TRUE,strip.white=TRUE,fill=TRUE)
 shortdata = read.table("All_Data_Short_Form.csv", header=T, sep=",",as.is=TRUE,strip.white=TRUE,fill=TRUE)
