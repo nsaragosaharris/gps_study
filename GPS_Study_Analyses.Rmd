@@ -1,0 +1,863 @@
+---
+title: "Analysis script for manuscript: Real-world exploration increases across adolescence and relates to affect, risk-taking, and social connectivity"
+author: "Natalie Saragosa-Harris"
+output: pdf_document
+fontfamily: arev
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache = FALSE)
+```
+
+``` {r loadPackages, echo = FALSE, message=FALSE, warning=FALSE}
+library(ggplot2)
+library(effects)
+library(glue)
+library(plyr)
+library(dplyr)
+library(lme4)
+library(lmerTest)
+library(tidyr)
+library(MASS) # For robust regression.
+library(sfsmisc) # For robust Wald F test.
+library(glmmTMB) # For multilevel regression with zero-inflated negative binomial distribution specified (novelty analyses).
+library(gtsummary) # For tbl_regression function.
+```
+
+``` {r loadData, echo = FALSE, message=FALSE, warning=FALSE}
+
+setwd("/Users/nataliesaragosa-harris/Box/HartleyLab_SHARED/1_STUDIES/MovesDev_AliHaniyyahAmberDasha/Data Sheets")
+
+longdata = read.table("All_Data_Long_Form.csv", header=T, sep=",",as.is=TRUE,strip.white=TRUE,fill=TRUE)
+shortdata = read.table("All_Data_Short_Form.csv", header=T, sep=",",as.is=TRUE,strip.white=TRUE,fill=TRUE)
+
+Participant_IDs <- shortdata$Participant_ID
+
+# Columns to convert to factors.
+shortdata_factor_columns <- c("Participant_ID", "Group","Gender")
+shortdata[shortdata_factor_columns] <- lapply(shortdata[shortdata_factor_columns], as.factor) 
+
+longdata_factor_columns <- c("Participant_ID", "Group","DayofWeek","TimeofDay","device_ID","Gender")
+longdata[longdata_factor_columns] <- lapply(longdata[longdata_factor_columns], as.factor) 
+
+# Make sure it is ordered by participant and by date.
+longdata$RecordedDate <-as.POSIXct(strptime(longdata$RecordedDate, "%Y-%m-%d"))
+longdata <- arrange(longdata,Participant_ID,RecordedDate)
+
+```
+
+``` {r createtheme, echo = FALSE, message=FALSE, warning=FALSE}
+# Create theme for plots.
+nsh_theme <- theme(title= element_text(size=26, vjust=2, face="bold"),
+         plot.title = element_blank(),
+         legend.title = element_text(size = 18),
+         legend.text = element_text(size = 14),
+         legend.key = element_rect(fill = NA, color = NA),
+         axis.title.x= element_text(size=18, vjust=-0.3),
+         axis.title.y= element_text(size=18, vjust=1.5),
+         axis.text.x= element_text(size=24, colour="black"),
+         axis.text.y= element_text(size=24, colour="black"),
+         strip.text = element_text(size=24, face="bold"),
+         axis.ticks.length=unit(.25, "cm"),
+         panel.background = element_blank(),
+         axis.line = element_line(colour = "black"))
+
+```
+
+```{r CalculateAverageNovelty, echo = FALSE, message=FALSE, warning=FALSE}
+# ######  This function will remove cases with missing data and save only the cases with values into a vector. ###### 
+completeFun <- function(data, desiredCols) {
+  completeVec <- complete.cases(data[, desiredCols])
+  return(data[completeVec, ])
+}
+
+# Create a version of the data that only has rows with observations (only keep days that have GPS data recorded).
+longdata_NoMissingGPS <- completeFun(longdata,"RE_Filtered") # Now every row should have a entropy, prediction error (except for first day), and novelty value.
+
+# Make sure the dataframe is ordered by participant and by date.
+longdata_NoMissingGPS$RecordedDate <-as.POSIXct(strptime(longdata_NoMissingGPS$RecordedDate, "%Y-%m-%d"))
+longdata_NoMissingGPS <- arrange(longdata_NoMissingGPS,Participant_ID,RecordedDate)
+
+# Within this dataframe that only includes days with GPS data, number each roaming entropy observation within participant so that we know which day of data collection it is for a given participant.
+longdata_NoMissingGPS <- longdata_NoMissingGPS %>% 
+          dplyr::group_by(Participant_ID) %>% 
+          dplyr::mutate(Study_Day= as.integer(row_number())) %>% 
+          as.data.frame
+
+# Remove first ten days of GPS data for a given participant (so that novelty estimates are less inflated).
+longdata_NoMissingGPS_FirstTenDaysRemoved <- subset(longdata_NoMissingGPS,Study_Day > 10)
+
+# # Get average daily novelty for each participant now that the first ten days have been removed.
+Novelty_Average_FirstTenDaysRemoved <- ddply(longdata_NoMissingGPS_FirstTenDaysRemoved, "Participant_ID", summarize, Novelty_Average_FirstTenDaysRemoved = mean(Novelty, na.rm= TRUE), Novelty_sd_FirstTenDaysRemoved = sd(Novelty, na.rm= TRUE))
+
+# #### Create Novelty_Z variable. #####
+# Note: Only calculate this for the dataframe that excludes the first ten days of data (not in longdata, because that has all days in it).
+longdata_NoMissingGPS_FirstTenDaysRemoved$Novelty_FirstTenDaysRemoved_Z <- (longdata_NoMissingGPS_FirstTenDaysRemoved$Novelty - longdata_NoMissingGPS_FirstTenDaysRemoved$Novelty_Average_FirstTenDaysRemoved)/(longdata_NoMissingGPS_FirstTenDaysRemoved$Novelty_sd_FirstTenDaysRemoved)
+```
+
+# Distributions
+
+*Age distributions in sample.*
+
+``` {r AgeDistributions, echo = FALSE, message=FALSE, warning=FALSE}
+max_age <- max(round(shortdata$Age),na.rm = TRUE) # 28.
+min_age <- min(round(shortdata$Age),na.rm = TRUE) # 13.
+
+total_plot <- ggplot(shortdata, aes(x=round(Age))) +
+       geom_bar(width=0.7,alpha= 0.8, position = position_dodge(width=0.3)) +
+       scale_x_continuous(breaks=c(seq(min_age, max_age, by=1))) + 
+       labs(title = "Ages in Sample",x = "Age") +
+       nsh_theme
+      
+total_plot
+
+```
+
+*Distribution of raw daily roaming entropy values across all participants (colored by age group)*
+
+```{r EntropyDistributions, echo = FALSE, message=FALSE, warning=FALSE}
+ggplot(longdata, aes(x=RE_Filtered, color=Group, fill = Group)) +
+  geom_histogram(alpha=0.5) +
+  scale_color_manual(values = c("#7BACAB", "gray40"), labels = c("Adolescent", "Adult"), name = "Age Group") +
+  scale_fill_manual(values = c("#7BACAB", "gray40"), labels = c("Adolescent", "Adult"), name = "Age Group") +
+  ylab("Count") +
+  xlab("Entropy Value") +
+  ggtitle("Roaming Entropy Distribution by Age Group")+
+  nsh_theme
+```
+
+*Distribution of novelty values across all participants (colored by age group).*
+
+```{r NoveltyDistributions, echo = FALSE, message=FALSE, warning=FALSE}
+ggplot(longdata_NoMissingGPS_FirstTenDaysRemoved, aes(x=Novelty, color=Group, fill = Group)) +
+  geom_histogram(alpha=0.5, bins=500) +
+  scale_color_manual(values = c("#7BACAB", "gray40"), labels = c("Adolescent", "Adult"), name = "Age Group") +
+  scale_fill_manual(values = c("#7BACAB", "gray40"), labels = c("Adolescent", "Adult"), name = "Age Group") +
+  ylab("Count") +
+  xlab("Novelty Value") +
+  ggtitle("Roaming Entropy Distribution by Age Group (First Ten Days Removed)")+
+  nsh_theme
+```
+
+# Analyses
+
+*Does roaming entropy predict exposure to novelty?*
+
+```{r EntropyNovelty, echo = FALSE, message=FALSE, warning=FALSE}
+# New: use glmmTMB to estimate zero-inflated model with poisson family distribution.
+# https://fcorowe.github.io/countdata_modelling/
+
+equation <- Novelty ~ RE_Z + (1 | Participant_ID)
+
+novelty_entropy_poisson_zeroinflated_binom <- glmmTMB(equation,
+                      data=longdata_NoMissingGPS_FirstTenDaysRemoved,
+                      ziformula=~1,
+                      family=nbinom2)
+
+summary(novelty_entropy_poisson_zeroinflated_binom)
+confint(novelty_entropy_poisson_zeroinflated_binom, level = 0.95)
+
+# Make sure the estimate does not change significantly when distance traveled is added to the model.
+equation_distance <- Novelty ~ RE_Z + distance_miles + (1 | Participant_ID)
+
+novelty_entropy_poisson_zeroinflated_binom_distance <- glmmTMB(equation_distance,
+                      data=longdata_NoMissingGPS_FirstTenDaysRemoved,
+                      ziformula=~1,
+                      family=nbinom2)
+
+summary(novelty_entropy_poisson_zeroinflated_binom_distance)
+confint(novelty_entropy_poisson_zeroinflated_binom_distance, level = 0.95)
+
+```
+
+*Are there age differences in average daily roaming entropy?*
+
+```{r AgeEntropy, echo = FALSE, message=FALSE, warning=FALSE}
+
+# There is one person with an entropy z score < -2.5 so we are using robust regression to account for the potential effect of outliers on the estimates.
+
+# Group effect.
+group_entropy_robust_standardized <- rlm(scale(Daily_RE_Mean,center=TRUE) ~ Group, data = shortdata) # Standardized coefficients.
+
+# Linear age effect.
+linear_age_entropy_robust_standardized <- rlm(scale(Daily_RE_Mean,center=TRUE) ~ Age_Z, data = shortdata) # Standardized coefficients. Age_Z is already scaled.
+
+# Quadratic effect.
+Quadratic_Age_Z_Entropy_robust <- rlm(Daily_RE_Mean ~ Age_Z + AgeZ_Squared, data = shortdata) # For plotting.
+Quadratic_Age_Z_Entropy_robust_standardized <- rlm(scale(Daily_RE_Mean,center=TRUE) ~ Age_Z + AgeZ_Squared, data = shortdata) # Standardized coefficients. Age_Z and AgeZ_Squared are already scaled.
+
+# Compare the three age models.
+AIC(group_entropy_robust_standardized) # 164.53.
+AIC(linear_age_entropy_robust_standardized) # 168.78.
+AIC(Quadratic_Age_Z_Entropy_robust_standardized) # 164.73.
+
+# AIC for quadratic age and group are nearly identical.
+summary(group_entropy_robust_standardized)
+f.robftest(group_entropy_robust_standardized,var="Group2")
+stats::confint.default(object = group_entropy_robust_standardized, parm = "Group2", level = 0.95)
+
+averagebygroup <- ddply(shortdata, "Group", summarize, entropyaverage=mean(Daily_RE_Mean,na.rm=TRUE))
+
+summary(Quadratic_Age_Z_Entropy_robust_standardized)
+f.robftest(Quadratic_Age_Z_Entropy_robust_standardized,var="Age_Z") 
+f.robftest(Quadratic_Age_Z_Entropy_robust_standardized,var="AgeZ_Squared")
+stats::confint.default(object = Quadratic_Age_Z_Entropy_robust_standardized, parm = "Age_Z", level = 0.95)
+stats::confint.default(object = Quadratic_Age_Z_Entropy_robust_standardized, parm = "AgeZ_Squared", level = 0.95)
+
+```
+
+## Figure 2a: Age and average entropy (age group).
+```{r Figure2a, echo = FALSE, warning = FALSE}
+
+figure2a <- ggplot(shortdata, aes(x=Group, y=Daily_RE_Mean, fill=Group)) + 
+    geom_boxplot(alpha = 0.8, outlier.shape=NA,show.legend=FALSE) + # Get rid of the outlier here because using geom_jitter, it will plot it twice.
+    geom_jitter(shape = 21, size = 3,  fill="black", alpha = 0.7, position=position_jitter(0.1),show.legend=FALSE) +
+    guides(color = guide_legend(override.aes = list(size = 10))) + # Increase point size.
+    scale_color_manual(values = c("#7BACAB", "gray40"), labels = c("Adolescent", "Adult"), name = "Age Group") +
+    scale_fill_manual(values = c("#7BACAB", "gray40"), labels = c("Adolescent", "Adult"), name = "Age Group") +
+    scale_x_discrete(labels = c("Adolescent", "Adult")) + 
+    scale_y_continuous(limits = c(1,7),breaks = seq(1,7,1)) + 
+    ylab("Average Daily Roaming Entropy") +
+    xlab("Age Group") +
+    nsh_theme
+
+figure2a
+```
+
+## Figure 2b: Age and average entropy (quadratic age).
+```{r Figure2b, echo = FALSE, message=FALSE, warning=FALSE}
+
+# Age and average entropy (quadratic age plots).
+plotdata <- shortdata
+plotdata$predicted <- fortify(Quadratic_Age_Z_Entropy_robust)$.fitted # Adding this in order to plot with original age units.
+
+# Plot original datapoints with standard errors (for each participant).
+standarderrors <- ddply(longdata, "Participant_ID", summarize, 
+                                N    = length(RE_Filtered[!is.na(RE_Filtered)]),
+                                mean = mean(RE_Filtered, na.rm= TRUE),
+                                sd=sd(RE_Filtered,na.rm=TRUE),
+                                se= sd/sqrt(N))
+
+standarderrors <- standarderrors[,c("Participant_ID","N","se")]
+shortdata <- merge(shortdata, standarderrors, by="Participant_ID")
+
+
+# Plot model predictions.
+# Used this code for the confidence interval.
+# https://plotly.com/ggplot2/geom_ribbon/
+
+temporary <- shortdata
+temporary$predicted <- fortify(Quadratic_Age_Z_Entropy_robust)$.fitted # Adding this in order to plot with original age units.
+plotdata <- temporary[,c("Participant_ID", "Group", "Age", "Gender",
+                                       "Daily_RE_Mean", "Daily_RE_Mean_Z", 
+                                       "Age", "Age_Z", "AgeZ_Squared", "se", "predicted")]
+
+fit <- predict(Quadratic_Age_Z_Entropy_robust)
+V <- vcov(Quadratic_Age_Z_Entropy_robust)
+X <- model.matrix(Quadratic_Age_Z_Entropy_robust)
+se.fit <- sqrt(diag(X %*% V %*% t(X)))
+predframe <- with(shortdata,data.frame(Age,Age_Z,
+                                predicted2=fit,lowerbound=fit-1.96*se.fit,upperbound=fit+1.96*se.fit))
+
+plotdata <- merge(plotdata,predframe, by = c("Age","Age_Z"))
+
+figure2b <- ggplot(plotdata, aes(x=Age, y = Daily_RE_Mean, group = Participant_ID, color=Group, fill = Group)) +
+   geom_ribbon(aes(x=Age,ymin = lowerbound, ymax = upperbound),inherit.aes = FALSE, alpha = 0.4, size = 1, color = "gray65", linetype="dotted", fill = "white") + # Add confidence interval.
+  scale_color_manual(values = c("#7BACAB", "gray40"), labels = c("Adolescent", "Adult"), name = "Age Group") +
+  scale_fill_manual(values = c("#7BACAB", "gray40"), labels = c("Adolescent", "Adult"), name = "Age Group") +
+  stat_smooth(data = plotdata, method='lm', formula=y~poly(x,2), size = 1.5, inherit.aes = FALSE,
+            aes(x=Age, y=predicted), color = "black", fullrange = TRUE) +
+  geom_errorbar(aes(ymin=Daily_RE_Mean-se, ymax=Daily_RE_Mean+se), width=.1,show.legend=FALSE)  +
+  geom_point(size = 4, alpha = 0.8) +
+  scale_y_continuous(limits = c(1,8),breaks = seq(1,7,1)) + 
+  ylab("Average Daily Roaming Entropy") +
+  xlab("Age") +
+  nsh_theme
+
+figure2b
+```
+
+*Are there age differences in average positive affect?*
+
+```{r AgeAffect, echo = FALSE, message=FALSE, warning=FALSE}
+
+# Group effect.
+group_positive_affect_robust <- rlm(scale(meanEMAPos,center=TRUE) ~ Group, data = shortdata)
+
+# Linear age effect.
+linear_age_positive_affect_robust <- rlm(scale(meanEMAPos,center=TRUE) ~ Age_Z, data = shortdata)
+
+# Quadratic effect.
+quadratic_age_z_positive_affect_robust <- rlm(scale(meanEMAPos,center=TRUE) ~ Age_Z + AgeZ_Squared, data = shortdata)
+
+# Compare the three age models.
+
+AIC(group_positive_affect_robust)
+AIC(linear_age_positive_affect_robust)
+AIC(quadratic_age_z_positive_affect_robust)
+
+# The age group model and linear age model have very similar AIC values, so look at both.
+summary(group_positive_affect_robust)
+f.robftest(group_positive_affect_robust,var="Group2") 
+stats::confint.default(object = group_positive_affect_robust, parm = "Group2", level = 0.95)
+
+summary(linear_age_positive_affect_robust)
+f.robftest(linear_age_positive_affect_robust,var="Age_Z") 
+stats::confint.default(object = linear_age_positive_affect_robust, parm = "Age_Z", level = 0.95)
+
+```
+
+*Are there age differences in the relationship between daily roaming entropy and positive affect?*
+
+```{r EntropyAgeAffect, echo = FALSE, message=FALSE, warning=FALSE}
+# Note: For interpretability, we are keeping positive affect in its original 0 to 100 scale (not standardizing).
+
+# Age group.
+PosAffect_RE_AgeGroup <- lmer(PosAff~  RE_Z * Group + (1 + RE_Z | Participant_ID), data=longdata) 
+
+# Linear age.
+PosAffect_RE_ageinteraction <- lmer(PosAff~  RE_Z * Age_Z + (1 + RE_Z | Participant_ID), data=longdata)
+
+# Quadratic age.
+PosAffect_RE_QuadraticAge <- lmer(PosAff~  RE_Z * Age_Z + RE_Z * AgeZ_Squared + (1 + RE_Z | Participant_ID), data=longdata)
+
+# Compare AIC for all three models.
+AIC(PosAffect_RE_AgeGroup)
+AIC(PosAffect_RE_ageinteraction)
+AIC(PosAffect_RE_QuadraticAge)
+
+# Age group model has the lowest AIC so will look at the results from that model.
+summary(PosAffect_RE_AgeGroup)
+confint(PosAffect_RE_AgeGroup,method = "boot")
+
+# Add controls: continuous age, temperature, precipitation levels, time of day, distance traveled, and day of week.
+# There should be full observations for all of the control variables.
+
+PosAffect_RE_AgeGroup_controls <-  lmer(PosAff ~  RE_Z * Group + (1 + RE_Z | Participant_ID) + mean_temp + precipitation + TimeofDay + DayofWeek + distance_miles, data= longdata, na.action=na.exclude)
+summary(PosAffect_RE_AgeGroup_controls) # None of the covariates are significant predictors.
+confint(PosAffect_RE_AgeGroup_controls,method = "boot")
+
+```
+
+## Supplemental Table 1
+
+```{r SupplementalTable1, echo = FALSE,message=FALSE, warning=FALSE}
+tbl_regression(PosAffect_RE_AgeGroup_controls)
+```
+
+## Figure 3a: Daily increases in roaming entropy relate to greater positive affect.
+```{r Figure3a, echo = FALSE, message=FALSE, warning=FALSE}
+
+# Entropy and positive affect. [This is not the interaction; not reporting this for now, only reporting estimates from interaction].
+# Just using to get the plots that are from a model without age, for figure 3a.
+
+RE_Z_model1 <-  lmer(PosAff~  RE_Z +  (1 + RE_Z | Participant_ID), data=longdata, na.action=na.exclude) 
+summary(RE_Z_model1)
+
+# Get fixed effects, so that they can be plotted.
+fixedeffect_slope <- as.double(fixef(RE_Z_model1)[2]) # 3.20.
+fixedeffect_intercept <- as.double(fixef(RE_Z_model1)[1]) # 68.52.
+
+# Plot without age group.
+# Predicted values (marginal effects) for fixed effect of roaming entropy.
+# Color the lines by age group.
+individual_effects <- coef(RE_Z_model1)
+individual_effects <- individual_effects$Participant_ID
+individual_effects <- setNames(cbind(rownames(individual_effects), individual_effects, row.names = NULL), 
+         c("Participant_ID", "Intercept", "FixRanSlope"))
+groups <- shortdata[,c("Participant_ID","Group")]
+individual_effects <- merge(individual_effects,groups,by="Participant_ID")
+individual_effects$Group <- as.factor(individual_effects$Group)
+
+individual_effects$RE_Negative4 <- (individual_effects$FixRanSlope*(-4)) + individual_effects$Intercept
+individual_effects$RE_Negative2 <-  (individual_effects$FixRanSlope*(-2)) + individual_effects$Intercept
+individual_effects$RE_Zero <-  individual_effects$Intercept
+individual_effects$RE_Positive2 <- (individual_effects$FixRanSlope*(2)) + individual_effects$Intercept
+individual_effects$RE_Positive4 <-  (individual_effects$FixRanSlope*(4)) + individual_effects$Intercept
+individual_effects_long <- gather(individual_effects, RE_Value, predicted, RE_Negative4:RE_Positive4, factor_key=TRUE)
+
+individual_effects_long$numbers <- individual_effects_long$RE_Value
+individual_effects_long$numbers <-  gsub('RE_Positive', '', individual_effects_long$numbers)
+individual_effects_long$numbers <-  gsub('RE_Negative', '-', individual_effects_long$numbers)
+individual_effects_long$numbers <-  gsub('RE_Zero', '0', individual_effects_long$numbers)
+individual_effects_long$numbers <- as.integer(individual_effects_long$numbers)
+
+
+figure3a <- ggplot(individual_effects_long, aes(x=numbers, y=predicted, color = Group, fill = Group)) +
+  scale_color_manual(values = c("#7BACAB", "gray40"), labels = c("Adolescent", "Adult"), name = "Age Group") +
+  scale_fill_manual(values = c("#7BACAB", "gray40"), labels = c("Adolescent", "Adult"), name = "Age Group") +
+  geom_line(aes(group = Participant_ID), size = 1, alpha = 0.6) +
+  geom_segment(linetype = "dashed", aes(x = -4, xend = 4,
+                    y = fixedeffect_intercept + fixedeffect_slope*-4, 
+                    yend = fixedeffect_intercept + fixedeffect_slope*4),
+                    size = 2,  color = "black") +
+  ylab("Positive Affect (0 to 100)") +
+  xlab("Daily roaming entropy (z-scored within participant)") +
+   nsh_theme +
+   theme(legend.text=element_text(size=18)) +
+   scale_y_continuous(breaks = seq(0, 100, by = 10))
+figure3a
+
+```
+
+## Figure 3b: The relation between roaming entropy and positive affect does not differ with respect to age.
+```{r Figure3b, echo = FALSE, message=FALSE, warning=FALSE}
+# Plot random effects of main model by age.
+# Note: use the model that does not include age as a covariate or moderator. Simply getting individual estimates, which we will plot by age.
+RE_Z_model1 <-  lmer(PosAff~  RE_Z +  (1 + RE_Z | Participant_ID), data=longdata) 
+#summary(RE_Z_model1)
+
+overall_fixedeffect_positive <- fixef(RE_Z_model1)[2] # First value is intercept, second value is fixed effect.
+
+# Plot individual fixed effects (instead of random effects, which are about deviations) by age.
+# The coef command takes into account both fixed and random effects.
+# Note: use the model that does not include age as a covariate. Simply getting individual estimates, which we will plot by age.
+
+individual_fixedeffects_df <- coef(RE_Z_model1)$Participant_ID
+individual_fixedeffects_df$Participant_ID <- rownames(individual_fixedeffects_df)
+individual_fixedeffects_df  <- merge(individual_fixedeffects_df, shortdata, by.x = "Participant_ID", by.y = "Participant_ID")
+colnames(individual_fixedeffects_df)[2] <- "Intercept"
+colnames(individual_fixedeffects_df)[3] <- "RE_FixedPlusRandomEffect"
+individual_fixedeffects_df$Group <- as.factor(individual_fixedeffects_df$Group) 
+individual_fixedeffects_df$Participant_ID<- as.factor(individual_fixedeffects_df$Participant_ID)
+
+figure3b <- ggplot(individual_fixedeffects_df, aes(x=Age, y=RE_FixedPlusRandomEffect, color = Group, fill = Group)) + 
+  geom_hline(yintercept=overall_fixedeffect_positive, linetype = "twodash", size = 2, color = "black", alpha = 0.9) + # Add line for the overall fixed effect.
+  geom_point(size=6, alpha = 0.75) + 
+  scale_color_manual(values = c("#7BACAB", "gray40"), labels = c("Adolescent", "Adult"), name = "Age Group") +
+  scale_fill_manual(values = c("#7BACAB", "gray40"), labels = c("Adolescent", "Adult"), name = "Age Group") +
+  ylab("Individual (Random + Fixed) Effect") +
+  xlab("Age") +
+  nsh_theme +
+  theme(legend.text=element_text(size=18))
+
+figure3b
+
+```
+
+*Are there age differences in the relationship between daily roaming entropy and overall affect? [Supplemental]*
+
+```{r AgeEntropyOverallAffect, echo = FALSE, message=FALSE, warning=FALSE}
+# Overall affect.
+overallaffect <- ddply(longdata, "Participant_ID", summarize,
+                       OverallAffect_mean = mean(OverallAffect, na.rm= TRUE),
+                       OverallAffect_sd = sd(OverallAffect, na.rm= TRUE))
+
+longdata <- merge(longdata,overallaffect,by="Participant_ID")
+longdata$OverallAffectZ <- (longdata$OverallAffect - longdata$OverallAffect_mean)/longdata$OverallAffect_sd
+
+OverallAffect_RE_agegroup_standardized <- lmer(OverallAffectZ ~  RE_Z * Group + (1 + RE_Z | Participant_ID), data=longdata)
+summary(OverallAffect_RE_agegroup_standardized)
+confint(OverallAffect_RE_agegroup_standardized,method = "boot")
+
+```
+
+*Does age relate to social network size?*
+
+```{r AgeSocialNetworkSize, echo = FALSE,message=FALSE, warning=FALSE}
+
+# Z score the total of phone and text scores.
+shortdata$SN_Phone_Text_Final_Z <- scale(shortdata$SN_Phone_Text_Final,center=TRUE,scale=TRUE)
+
+socialnetwork_participants <- subset(shortdata, !is.na(SN_Phone_Text_Final))
+
+# Group effect.
+group_social_robust <- rlm(SN_Phone_Text_Final_Z ~ Group, data = shortdata, na.action=na.exclude)
+
+# Linear age effect.
+linear_age_social_robust <- rlm(SN_Phone_Text_Final_Z ~ Age_Z, data = shortdata, na.action=na.exclude)
+
+# Quadratic effect.
+quadratic_age_z_social_robust <- rlm(SN_Phone_Text_Final_Z ~ Age_Z + AgeZ_Squared, data = shortdata, na.action=na.exclude)
+
+# Compare the three age models.
+AIC(group_social_robust)
+AIC(linear_age_social_robust)
+AIC(quadratic_age_z_social_robust)
+
+# Age group, linear age, and quadratic age models give very similar AIC values.
+summary(group_social_robust)
+f.robftest(group_social_robust,var="Group2")
+stats::confint.default(object = group_social_robust, parm = "Group2", level = 0.95)
+
+summary(linear_age_social_robust)
+f.robftest(linear_age_social_robust,var="Age_Z")
+stats::confint.default(object = linear_age_social_robust, parm = "Age_Z", level = 0.95)
+
+summary(quadratic_age_z_social_robust)
+f.robftest(quadratic_age_z_social_robust,var="AgeZ_Squared")
+stats::confint.default(object = quadratic_age_z_social_robust, parm = "AgeZ_Squared", level = 0.95)
+
+```
+
+*Does age relate to the difference social network size by modality (text vs. phone calls)?*
+
+```{r AgePhoneTextDifference, echo = FALSE, message=FALSE, warning=FALSE}
+
+socialdata <- shortdata %>% dplyr::select(Participant_ID:Age,AgeZ_Squared,
+                                   SN_Text_Final,
+                                   SN_Phone_Final,
+                                   SN_Phone_Text_Final)
+
+socialdata$phone_text_difference <- socialdata$SN_Text_Final - socialdata$SN_Phone_Final
+
+# Age group.
+age_group_differences_modalitydifference <- rlm(scale(phone_text_difference,center=TRUE) ~ Group, data = socialdata, na.action = na.exclude)
+summary(age_group_differences_modalitydifference)
+f.robftest(age_group_differences_modalitydifference,var="Group2")
+stats::confint.default(object = age_group_differences_modalitydifference, parm = "Group2", level = 0.95)
+
+# Linear age.
+linear_age_differences_modalitydifference <- rlm(scale(phone_text_difference,center=TRUE)  ~ scale(Age,center=TRUE), data = socialdata, na.action = na.exclude)
+summary(linear_age_differences_modalitydifference)
+f.robftest(linear_age_differences_modalitydifference,var="scale(Age, center = TRUE)") 
+stats::confint.default(object = linear_age_differences_modalitydifference, parm = "scale(Age, center = TRUE)", level = 0.95)
+
+# Quadratic age.
+quadratic_age_differences_modalitydifference <- rlm(scale(phone_text_difference,center=TRUE)  ~ scale(Age,center=TRUE) + AgeZ_Squared, data = socialdata, na.action = na.exclude)
+summary(quadratic_age_differences_modalitydifference)
+f.robftest(quadratic_age_differences_modalitydifference,var="AgeZ_Squared") 
+stats::confint.default(object = quadratic_age_differences_modalitydifference, parm = "AgeZ_Squared", level = 0.95)
+
+```
+
+*Does average entropy relate to social network size?*
+
+```{r EntropySocialNetwork, echo = FALSE, message=FALSE, warning=FALSE}
+
+phone_text_data <- shortdata[complete.cases(shortdata[,"SN_Phone_Text_Final"]), ] # Get rid of rows with NA values.
+
+RE_Phone_Text_robust_standardized <- rlm(SN_Phone_Text_Final_Z ~ Daily_RE_Mean_Z, data = phone_text_data, na.action=na.exclude)
+summary(RE_Phone_Text_robust_standardized)
+f.robftest(RE_Phone_Text_robust_standardized, var = "Daily_RE_Mean_Z")
+stats::confint.default(object = RE_Phone_Text_robust_standardized, parm = "Daily_RE_Mean_Z", level = 0.95)
+
+# Get model predictions and confidence intervals for plot.
+# Use non-standardized version for plots (so that social network size is in original units.)
+RE_Phone_Text_robust <- rlm(SN_Phone_Text_Final ~ Daily_RE_Mean_Z, data = phone_text_data, na.action=na.exclude)
+
+temporary <- phone_text_data
+temporary$predicted <- fortify(RE_Phone_Text_robust)$.fitted # Adding this in order to plot with original age units.
+plotdata <- temporary[,c("Participant_ID", "Group",
+                                       "Daily_RE_Mean_Z", 
+                                       "SN_Phone_Text_Final", "predicted")]
+
+fit <- predict(RE_Phone_Text_robust)
+V <- vcov(RE_Phone_Text_robust)
+X <- model.matrix(RE_Phone_Text_robust)
+se.fit <- sqrt(diag(X %*% V %*% t(X)))
+predframe <- with(phone_text_data,data.frame(Daily_RE_Mean_Z,
+                                predicted2=fit,lowerbound=fit-1.96*se.fit,upperbound=fit+1.96*se.fit))
+
+
+plotdata <- merge(plotdata,predframe, by = "Daily_RE_Mean_Z")
+
+figure4 <- ggplot(plotdata, aes(x=Daily_RE_Mean_Z, y=SN_Phone_Text_Final, color=Group, fill = Group)) +
+  scale_color_manual(values = c("#7BACAB", "gray40"), labels = c("Adolescent", "Adult"), name = "Age Group") +
+  scale_fill_manual(values = c("#7BACAB", "gray40"), labels = c("Adolescent", "Adult"), name = "Age Group") +
+  geom_ribbon(aes(ymin = lowerbound, ymax = upperbound), alpha = 0.4, size = 1, color = "gray65", linetype="dotted", fill = "white") + # Add confidence interval.
+  stat_smooth(data = plotdata, color = "black", alpha = 0.8, method='lm', size = 1, inherit.aes = FALSE, # Add main effect line.
+            aes(x=Daily_RE_Mean_Z, y=predicted), fullrange = TRUE) +
+  geom_point(size = 7, alpha = 0.75) +
+  ylab("Social Network Size") +
+  xlab("Average Roaming Entropy (Z-Scored Across Participants)") +
+  nsh_theme
+
+```
+
+## Figure 4: Roaming entropy and social network size.
+
+```{r Figure4, echo = FALSE, message=FALSE, warning=FALSE}
+figure4
+```
+
+# Entropy, social network size, and age.
+
+*Are there age differences in how average entropy relates to social network size?*
+```{r EntropySocialNetworkAge, echo = FALSE, message=FALSE, warning=FALSE}
+
+phone_text_data <- shortdata[complete.cases(shortdata[,"SN_Phone_Text_Final"]), ] # Get rid of rows with NA values.
+# Redo z scoring of groups because there is a different number of participants in this sample.
+phone_text_data$group_z_social <- scale(as.numeric(phone_text_data$Group),center=TRUE)
+
+# Group effect.
+group_phone_text_entropy_robust <- rlm(SN_Phone_Text_Final_Z ~ Daily_RE_Mean_Z*Group, data = phone_text_data, na.action=na.exclude)
+
+# Group effect (with group standardized; this is only for power analysis).
+group_z_phone_text_entropy_robust <- rlm(SN_Phone_Text_Final_Z ~ Daily_RE_Mean_Z*group_z_social , data = phone_text_data, na.action=na.exclude)
+
+# Linear age effect.
+linear_age_phone_text_entropy_robust <- rlm(SN_Phone_Text_Final_Z~  Daily_RE_Mean_Z*Age_Z, data = phone_text_data, na.action=na.exclude)
+
+# Quadratic effect.
+quadratic_age_z_phone_text_entropy_robust <- rlm(SN_Phone_Text_Final_Z ~ Daily_RE_Mean_Z*Age_Z + Daily_RE_Mean_Z*AgeZ_Squared, data = phone_text_data, na.action=na.exclude)
+
+# Compare the three age models.
+AIC(group_phone_text_entropy_robust)
+AIC(linear_age_phone_text_entropy_robust)
+AIC(quadratic_age_z_phone_text_entropy_robust)
+
+# The AIC is similar for linear and age group models.
+# Age group.
+summary(group_phone_text_entropy_robust)
+f.robftest(group_phone_text_entropy_robust, var = "Daily_RE_Mean_Z") # b1.
+stats::confint.default(object = group_phone_text_entropy_robust, parm = "Daily_RE_Mean_Z", level = 0.95)
+
+f.robftest(group_phone_text_entropy_robust, var = "Group2") # b2.
+stats::confint.default(object = group_phone_text_entropy_robust, parm = "Group2", level = 0.95)
+
+f.robftest(group_phone_text_entropy_robust, var = "Daily_RE_Mean_Z:Group2") # b3 (interaction).
+stats::confint.default(object = group_phone_text_entropy_robust, parm = "Daily_RE_Mean_Z:Group2", level = 0.95)
+
+# Linear age.
+summary(linear_age_phone_text_entropy_robust)
+f.robftest(linear_age_phone_text_entropy_robust, var = "Daily_RE_Mean_Z") # b1.
+stats::confint.default(object = linear_age_phone_text_entropy_robust, parm = "Daily_RE_Mean_Z", level = 0.95)
+# estimate = 0.37, 95% CI [0.17, 0.56], F(42) = 13.44, p < 0.001.
+
+f.robftest(linear_age_phone_text_entropy_robust, var = "Age_Z") # b2.
+stats::confint.default(object = linear_age_phone_text_entropy_robust, parm = "Age_Z", level = 0.95)
+# estimate = -0.09, 5% CI [-0.28, 0.09], F(42) =  0.97, p = 0.33.
+
+f.robftest(linear_age_phone_text_entropy_robust, var = "Daily_RE_Mean_Z:Age_Z") # b3 (interaction).
+stats::confint.default(object = linear_age_phone_text_entropy_robust, parm = "Daily_RE_Mean_Z:Age_Z", level = 0.95)
+# estimate = -0.14, 95% CI [-0.34, 0.06], F(42) = 2.06, p = 0.16.
+
+# Note that the linear term for roaming entropy is still significant in the interaction models.
+f.robftest(group_phone_text_entropy_robust, var = "Daily_RE_Mean_Z")
+f.robftest(linear_age_phone_text_entropy_robust, var = "Daily_RE_Mean_Z")
+
+```
+
+*Does age relate to risk taking?*
+
+```{r DOSPERT_CARE_Age, echo = FALSE,message=FALSE, warning=FALSE}
+
+# Average risk taking by age.
+## Look at DOSPERT and CARE separately.
+
+# Get average by dividing by number of items (39 for adolescents and 30 for adults).
+shortdata <- shortdata %>% 
+          mutate(DOSPERT_mean = case_when(shortdata$Group ==1 ~ DOSPERT_Total/39, # for adolescents, there are 39 questions.
+                                          shortdata$Group == 2 ~ DOSPERT_Total/30)) # for adults, there are 30 questions.
+
+# Get overall mean and sd of DOSPERT for each age group so that their scores can be z scored.
+adolescents <- subset(shortdata,Group == 1)
+adults <- subset(shortdata,Group == 2)
+mean_adolescent_dospert <- mean(adolescents$DOSPERT_mean, na.rm=TRUE)
+sd_adolescent_dospert <- sd(adolescents$DOSPERT_mean, na.rm=TRUE)
+mean_adult_dospert <- mean(adults$DOSPERT_mean, na.rm=TRUE)
+sd_adult_dospert  <- sd(adults$DOSPERT_mean, na.rm=TRUE)
+
+shortdata <- shortdata %>% 
+          mutate(DOSPERT_mean_z = case_when(shortdata$Group ==1 ~ (DOSPERT_mean - mean_adolescent_dospert)/sd_adolescent_dospert,
+                                          shortdata$Group == 2 ~ (DOSPERT_mean - mean_adult_dospert)/sd_adult_dospert))
+
+# Does age predict average DOSPERT scores?
+
+DOSPERT_group <- rlm(DOSPERT_mean_z ~ Group, data = shortdata, na.action=na.exclude)
+summary(DOSPERT_group)
+f.robftest(DOSPERT_group, var = "Group2")
+stats::confint.default(object = DOSPERT_group, parm = "Group2", level = 0.95)
+
+DOSPERT_linear_age <- rlm(scale(DOSPERT_mean,center=TRUE) ~ Age_Z, data = shortdata, na.action=na.exclude)
+summary(DOSPERT_linear_age)
+f.robftest(DOSPERT_linear_age, var = "Age_Z") 
+stats::confint.default(object = DOSPERT_linear_age, parm = "Age_Z", level = 0.95)
+
+DOSPERT_quadratic_age <- rlm(scale(DOSPERT_mean,center=TRUE) ~ Age_Z + AgeZ_Squared, data = shortdata, na.action=na.exclude)
+summary(DOSPERT_quadratic_age)
+f.robftest(DOSPERT_quadratic_age, var = "AgeZ_Squared")
+stats::confint.default(object = DOSPERT_quadratic_age, parm = "AgeZ_Squared", level = 0.95)
+
+# Does age predict average CARE scores?
+
+CARE_group <- rlm(scale(CARE_Total,center=TRUE) ~ Group, data = shortdata, na.action=na.exclude)
+summary(CARE_group)
+f.robftest(CARE_group, var = "Group2")
+stats::confint.default(object = CARE_group, parm = "Group2", level = 0.95)
+
+CARE_linear_age <- rlm(scale(CARE_Total,center=TRUE) ~ Age_Z, data = shortdata, na.action=na.exclude)
+summary(CARE_linear_age)
+f.robftest(CARE_linear_age, var = "Age_Z")
+stats::confint.default(object = CARE_linear_age, parm = "Age_Z", level = 0.95)
+
+CARE_quadratic_age <- rlm(scale(CARE_Total,center=TRUE) ~ Age_Z + AgeZ_Squared, data = shortdata, na.action=na.exclude)
+summary(CARE_quadratic_age)
+f.robftest(CARE_quadratic_age, var = "AgeZ_Squared")
+stats::confint.default(object = CARE_quadratic_age, parm = "AgeZ_Squared", level = 0.95)
+
+```
+
+*Does the relationship between average roaming entropy and risk taking differ by age?*
+
+```{r DOSPERT_CARE_Entropy_Age, echo = FALSE, message=FALSE, warning=FALSE}
+# Does the relationship between average roaming entropy and average DOSPERT scores differ by age?
+dospert_data <- subset(shortdata,!is.na(DOSPERT_mean))
+
+DOSPERT_entropy_group <- rlm(scale(DOSPERT_mean,center=TRUE)  ~ Daily_RE_Mean_Z*Group, data = dospert_data, na.action=na.exclude)
+
+DOSPERT_entropy_linearage <- rlm(scale(DOSPERT_mean,center=TRUE) ~ Daily_RE_Mean_Z*Age_Z, data = dospert_data, na.action=na.exclude)
+DOSPERT_entropy_quadraticage <- rlm(scale(DOSPERT_mean,center=TRUE) ~ Daily_RE_Mean_Z*Age_Z + Daily_RE_Mean_Z*AgeZ_Squared , data = dospert_data, na.action=na.exclude)
+
+AIC(DOSPERT_entropy_group)
+AIC(DOSPERT_entropy_linearage)
+AIC(DOSPERT_entropy_quadraticage)
+
+# The group model is favored, so look at that one.
+summary(DOSPERT_entropy_group)
+f.robftest(DOSPERT_entropy_group, var = "Daily_RE_Mean_Z")
+stats::confint.default(object = DOSPERT_entropy_group, parm = "Daily_RE_Mean_Z", level = 0.95)
+
+f.robftest(DOSPERT_entropy_group, var = "Group2")
+stats::confint.default(object = DOSPERT_entropy_group, parm = "Group2", level = 0.95)
+
+f.robftest(DOSPERT_entropy_group, var = "Daily_RE_Mean_Z:Group2")
+stats::confint.default(object = DOSPERT_entropy_group, parm = "Daily_RE_Mean_Z:Group2", level = 0.95)
+
+# Plot the effects (Figure 5A, dospert).
+# Used this code for the confidence interval.
+# https://plotly.com/ggplot2/geom_ribbon/
+# https://stackoverflow.com/questions/14033551/r-plotting-confidence-bands-with-ggplot/14033770#14033770
+
+# Use the robust linear regression (with age group as a moderator) to get the estimated lines.
+dospert_plotdata <- dospert_data
+dospert_plotdata$predicted <- fortify(DOSPERT_entropy_group)$.fitted
+dospert_plotdata <- dospert_plotdata[,c("Participant_ID", "Group",
+                                       "Daily_RE_Mean_Z",
+                                       "DOSPERT_mean", "predicted")]
+
+dospert_plotdata$DOSPERT_mean_z <- scale(dospert_plotdata$DOSPERT_mean, center = TRUE)
+
+fit <- predict(DOSPERT_entropy_group)
+V <- vcov(DOSPERT_entropy_group)
+X <- model.matrix(DOSPERT_entropy_group)
+se.fit <- sqrt(diag(X %*% V %*% t(X)))
+predframe <- with(dospert_plotdata,data.frame(Daily_RE_Mean_Z,
+                                predicted2=fit,lowerbound=fit-1.96*se.fit,upperbound=fit+1.96*se.fit))
+
+dospert_plotdata <- merge(dospert_plotdata,predframe, by = "Daily_RE_Mean_Z")
+
+
+# Simple slopes.
+adolescents <- subset(dospert_plotdata,Group == 1)
+adolescent_simple_slope <- lm(predicted ~ Daily_RE_Mean_Z, data = adolescents)
+adolescent_intercept <- as.numeric(adolescent_simple_slope$coefficients[1])
+adolescent_slope <- as.numeric(adolescent_simple_slope$coefficients[2])
+
+adults <- subset(dospert_plotdata,Group == 2)
+adult_simple_slope  <- lm(predicted ~ Daily_RE_Mean_Z, data = adults)
+adult_intercept <- as.numeric(adult_simple_slope$coefficients[1])
+adult_slope <- as.numeric(adult_simple_slope$coefficients[2])
+
+figure5a <- ggplot(dospert_plotdata, aes(x=Daily_RE_Mean_Z, y = DOSPERT_mean_z, color = Group, fill = Group)) +
+  scale_color_manual(values = c("#7BACAB", "gray40"), labels = c("Adolescent", "Adult"), name = "Age Group") +
+  scale_fill_manual(values = c("#7BACAB", "gray40"), labels = c("Adolescent", "Adult"), name = "Age Group") +
+  xlim(-3.20, 2.20) + ylim(-4, 4) +
+  scale_x_continuous(limits = c(-3.20, 2.20), breaks = c(-3,-2,-1,0,1,2)) +
+  scale_y_continuous(limits = c(-4, 4), breaks = c(-3,-2,-1,0,1,2,3)) +
+  # Add each line twice to make confidence interval really light (and then line over it); once for confidence interval, once for line.
+  stat_smooth(data = adolescents, method='lm', size = 2, se = TRUE, alpha = 0.20,
+              aes(x=Daily_RE_Mean_Z, y=DOSPERT_mean_z), color = "#7BACAB", fill = "#7BACAB",  fullrange = TRUE) +
+  stat_smooth(data = adolescents, method='lm', size = 2, se = FALSE, alpha = 0.60,
+              aes(x=Daily_RE_Mean_Z, y=DOSPERT_mean_z), color = "#7BACAB", fill = "#7BACAB",  fullrange = TRUE) +
+  stat_smooth(data = adults, method='lm', size = 2, se = TRUE, alpha = 0.20,
+              aes(x=Daily_RE_Mean_Z, y=DOSPERT_mean_z), color = "gray40", fill =  "gray40", fullrange = TRUE) +
+  stat_smooth(data = adults, method='lm', size = 2, se = FALSE, alpha = 0.60,
+              aes(x=Daily_RE_Mean_Z, y=DOSPERT_mean_z), color = "gray40", fill =  "gray40", fullrange = TRUE) +
+  ylab("DOSPERT Score (z-scored)") +
+  xlab("Average Roaming Entropy (z-scored)") +
+  nsh_theme +
+  geom_point(size=7, alpha = 0.80)
+
+# Does the relationship between average roaming entropy and average CARE scores differ by age?
+care_data <- subset(shortdata,!is.na(CARE_Total))
+
+CARE_entropy_age_group <- rlm(scale(CARE_Total,center=TRUE) ~ Daily_RE_Mean_Z*Group, data = care_data, na.action = na.exclude)
+CARE_entropy_linear_age  <- rlm(scale(CARE_Total,center=TRUE) ~ Daily_RE_Mean_Z*Age_Z, data = care_data, na.action = na.exclude)
+CARE_entropy_quadratic_age <- rlm(scale(CARE_Total,center=TRUE) ~ Daily_RE_Mean_Z*Age_Z + Daily_RE_Mean_Z*AgeZ_Squared, data = care_data, na.action = na.exclude)
+
+# Compare AIC values.
+AIC(CARE_entropy_age_group)
+AIC(CARE_entropy_linear_age)
+AIC(CARE_entropy_quadratic_age)
+
+# Age group has the lowest AIC value so look at that one.
+summary(CARE_entropy_age_group)
+f.robftest(CARE_entropy_age_group, var = "Daily_RE_Mean_Z") # b1.
+stats::confint.default(object = CARE_entropy_age_group, parm = "Daily_RE_Mean_Z", level = 0.95)
+
+f.robftest(CARE_entropy_age_group, var = "Group2") # b2.
+stats::confint.default(object = CARE_entropy_age_group, parm = "Group2", level = 0.95)
+
+f.robftest(CARE_entropy_age_group, var = "Daily_RE_Mean_Z:Group2") # b3 (interaction).
+stats::confint.default(object = CARE_entropy_age_group, parm = "Daily_RE_Mean_Z:Group2", level = 0.95)
+
+mean(subset(shortdata,Group == 1)$CARE_Total)
+mean(subset(shortdata,Group == 2)$CARE_Total)
+
+# Use the robust linear regression (with age group as a moderator) to get the estimated lines.
+care_plotdata <- care_data
+care_plotdata$predicted <- fortify(CARE_entropy_age_group)$.fitted # Adding this in order to plot with original age units.
+care_plotdata <- care_plotdata[,c("Participant_ID", "Group",
+                                       "Daily_RE_Mean_Z",
+                                       "CARE_Total", "predicted")]
+
+care_plotdata$CARE_Total_z <- scale(care_plotdata$CARE_Total, center = TRUE)
+
+fit <- predict(CARE_entropy_age_group)
+V <- vcov(CARE_entropy_age_group)
+X <- model.matrix(CARE_entropy_age_group)
+se.fit <- sqrt(diag(X %*% V %*% t(X)))
+predframe <- with(care_plotdata,data.frame(Daily_RE_Mean_Z,
+                                predicted2=fit,lowerbound=fit-1.96*se.fit,upperbound=fit+1.96*se.fit))
+
+
+care_plotdata <- merge(care_plotdata,predframe, by = "Daily_RE_Mean_Z")
+
+
+# Simple slopes.
+adolescents <- subset(care_plotdata,Group == 1)
+adolescent_simple_slope <- lm(predicted ~ Daily_RE_Mean_Z, data = adolescents)
+adolescent_intercept <- as.numeric(adolescent_simple_slope$coefficients[1])
+adolescent_slope <- as.numeric(adolescent_simple_slope$coefficients[2])
+
+adults <- subset(care_plotdata,Group == 2)
+adult_simple_slope  <- lm(predicted ~ Daily_RE_Mean_Z, data = adults)
+adult_intercept <- as.numeric(adult_simple_slope$coefficients[1])
+adult_slope <- as.numeric(adult_simple_slope$coefficients[2])
+
+
+figure5b <- ggplot(care_plotdata, aes(x=Daily_RE_Mean_Z, y = CARE_Total_z, color = Group, fill = Group)) +
+  scale_color_manual(values = c("#7BACAB", "gray40"), labels = c("Adolescent", "Adult"), name = "Age Group") +
+  scale_fill_manual(values = c("#7BACAB", "gray40"), labels = c("Adolescent", "Adult"), name = "Age Group") +
+  xlim(-3.20, 2.20) + ylim(-4, 4) +
+  scale_x_continuous(limits = c(-3.20, 2.20), breaks = c(-3,-2,-1,0,1,2)) +
+  scale_y_continuous(limits = c(-4, 4), breaks = c(-3,-2,-1,0,1,2,3)) +
+  # Add each line twice to make confidence interval really light (and then line over it); once for confidence interval, once for line.
+  stat_smooth(data = adolescents, method='lm', size = 2, se = TRUE, alpha = 0.20,
+              aes(x=Daily_RE_Mean_Z, y=CARE_Total_z), color = "#7BACAB", fill = "#7BACAB",  fullrange = TRUE) +
+  stat_smooth(data = adolescents, method='lm', size = 2, se = FALSE, alpha = 0.60,
+              aes(x=Daily_RE_Mean_Z, y=CARE_Total_z), color = "#7BACAB", fill = "#7BACAB",  fullrange = TRUE) +
+  stat_smooth(data = adults, method='lm', size = 2, se = TRUE, alpha = 0.20,
+              aes(x=Daily_RE_Mean_Z, y=CARE_Total_z), color = "gray40", fill =  "gray40", fullrange = TRUE) +
+  stat_smooth(data = adults, method='lm', size = 2, se = FALSE, alpha = 0.60,
+              aes(x=Daily_RE_Mean_Z, y=CARE_Total_z), color = "gray40", fill =  "gray40", fullrange = TRUE) +
+  ylab("CARE Score (z-scored)") +
+  xlab("Average Roaming Entropy (z-scored)") +
+  nsh_theme +
+  geom_point(size=7, alpha = 0.80)
+
+```
+
+## Figure 5a: DOSPERT, roaming entropy, and age.
+
+```{r Figure5a, echo = FALSE, message=FALSE, warning=FALSE}
+figure5a
+```
+
+## Figure 5b: CARE, roaming entropy, and age.
+
+```{r Figure5b, echo = FALSE, message=FALSE, warning=FALSE}
+figure5b
+```
