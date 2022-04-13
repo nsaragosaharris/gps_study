@@ -1,5 +1,5 @@
 # GPS_Study
-Analysis and task code for Saragosa-Harris, N.M., Cohen, A.O., Reneau, T.R., Villano, W.J., Heller, A.S., & Hartley, C.A. (under review). Real-world exploration increases across adolescence and relates to affect, risk-taking, and social connectivity.
+Data and code for Saragosa-Harris, N.M., Cohen, A.O., Reneau, T.R., Villano, W.J., Heller, A.S., & Hartley, C.A. (under review). Real-world exploration increases across adolescence and relates to affect, risk-taking, and social connectivity.
 
 For questions about the data or scripts, email nsaragosaharris@ucla.edu.
 
