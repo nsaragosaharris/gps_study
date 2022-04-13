@@ -6,7 +6,9 @@ For questions about the data or scripts, email nsaragosaharris@ucla.edu.
 **Data.**
 
 All data required to reproduce the reported results are included in the 'Data' folder.
+
 All_Data_Long_Form.csv: This is the longitudinal, within-participant data that includes daily roaming entropy and affect values.
+
 All_Data_Short_Form.csv: This is the between-participant data that includes averages and single observations (e.g., age, group, etc.) for participants.
 
 Note that, due to the inherently identifiable nature of raw GPS data (i.e., longitude and latitude values), we cannot share those data, but have provided the script used to calculate roaming entropy from those data (filter_entropy_calculator.R).
