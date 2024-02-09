@@ -1,5 +1,10 @@
 # GPS_Study
-Saragosa-Harris, N. M., Cohen, A. O., Reneau, T. R., Villano, W. J., Heller, A. S., & Hartley, C. A. (2022). Real-world exploration increases across adolescence and relates to affect, risk taking, and social connectivity. *Psychological Science*, 33(10), 1664-1679. https://doi.org/10.1177/09567976221102070.
+
+**Corresponding paper.**
+
+Saragosa-Harris, N. M., Cohen, A. O., Reneau, T. R., Villano, W. J., Heller, A. S., & Hartley, C. A. (2022). Real-world exploration increases across adolescence and relates to affect, risk taking, and social connectivity. *Psychological Science*, 33(10), 1664-1679. https://doi.org/10.1177/09567976221102070.**
+
+**Published manuscript: https://journals.sagepub.com/doi/full/10.1177/09567976221102070.**
 
 For questions about the data or scripts, email nsaragosaharris@ucla.edu.
 
